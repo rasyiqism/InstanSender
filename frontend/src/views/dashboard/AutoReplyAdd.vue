@@ -43,7 +43,7 @@ const matchModes = [
 ]
 
 const selectedDevice = computed(() =>
-  devices.devices.find((d) => d.id === selectedId.value),
+  (devices.devices || []).find((d) => d && d.id === selectedId.value),
 )
 
 const valid = computed(
@@ -67,8 +67,9 @@ function insertName() {
 
 onMounted(async () => {
   await devices.fetch()
-  if (devices.devices.length && !selectedId.value) {
-    selectedId.value = devices.devices[0].id
+  const validDevices = (devices.devices || []).filter((d) => d && d.id)
+  if (validDevices.length && !selectedId.value) {
+    selectedId.value = validDevices[0].id
   }
 })
 
@@ -161,7 +162,7 @@ function addAnother() {
             v-model="selectedId"
             class="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
           >
-            <option v-for="d in devices.devices" :key="d.id" :value="d.id">
+            <option v-for="d in (devices.devices || []).filter((d) => d && d.id)" :key="d.id" :value="d.id">
               {{ d.name }}{{ d.phoneNumber ? ` (${d.phoneNumber})` : '' }}
             </option>
           </select>

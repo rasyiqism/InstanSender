@@ -73,6 +73,7 @@ export const deviceRoutes = new Elysia({ prefix: '/devices' })
 
       return {
         ...device,
+        device,
         qr,
       };
     },

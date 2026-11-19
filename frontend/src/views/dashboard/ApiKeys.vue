@@ -105,7 +105,7 @@ async function copyBase() {
 
 function scopeLabel(k) {
   if (!k.deviceId) return "Account-wide";
-  const d = deviceStore.devices.find((d) => d.id === k.deviceId);
+  const d = (deviceStore.devices || []).find((d) => d && d.id === k.deviceId);
   return d ? d.name : "Device";
 }
 
@@ -234,7 +234,7 @@ function formatDate(iso) {
           class="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 sm:w-64"
         >
           <option value="">Account-wide (all devices)</option>
-          <option v-for="d in deviceStore.devices" :key="d.id" :value="d.id">
+          <option v-for="d in (deviceStore.devices || []).filter((d) => d && d.id)" :key="d.id" :value="d.id">
             {{ d.name }}
           </option>
         </select>

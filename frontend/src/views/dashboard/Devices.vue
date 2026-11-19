@@ -98,7 +98,10 @@ async function addDevice() {
     const result = await store.create(newName.value.trim());
     newName.value = "";
     addModal.value = { open: false, loading: false };
-    openQr(result.device.id, result.qr);
+    const deviceId = result?.device?.id || result?.id;
+    if (deviceId) {
+      openQr(deviceId, result?.qr);
+    }
   } catch (err) {
     addError.value = err.response?.data?.message ?? "Failed to add device";
   } finally {
@@ -219,7 +222,7 @@ onUnmounted(() => {
     <!-- Device List -->
     <div v-else class="grid gap-4">
       <Card
-        v-for="d in store.devices"
+        v-for="d in (store.devices || []).filter((d) => d && d.id)"
         :key="d.id"
         class="group overflow-hidden p-0 transition-all duration-200 hover:shadow-md"
       >

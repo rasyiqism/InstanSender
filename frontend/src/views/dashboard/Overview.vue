@@ -36,7 +36,7 @@ onMounted(async () => {
 })
 
 const activeDevices = computed(
-  () => deviceStore.devices.filter((d) => d.status === 'connected').length,
+  () => (deviceStore.devices || []).filter((d) => d && d.status === 'connected').length,
 )
 
 function badgeVariant(status) {
@@ -180,7 +180,7 @@ const quickActions = [
 
       <div v-else class="divide-y divide-slate-100">
         <div
-          v-for="d in deviceStore.devices"
+          v-for="d in (deviceStore.devices || []).filter((d) => d && d.id)"
           :key="d.id"
           class="flex items-center justify-between px-5 py-3.5 transition-colors hover:bg-slate-50/60"
         >

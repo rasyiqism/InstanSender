@@ -41,7 +41,8 @@ const form = reactive({
 
 onMounted(async () => {
   await Promise.all([store.fetchBroadcasts(), devices.fetch(), store.fetchContactLists()])
-  if (devices.devices.length && !form.deviceId) form.deviceId = devices.devices[0].id
+  const validDevices = (devices.devices || []).filter((d) => d && d.id)
+  if (validDevices.length && !form.deviceId) form.deviceId = validDevices[0].id
 })
 
 const canCreate = computed(() => {
@@ -237,7 +238,7 @@ function progressPercent(b) {
               v-model="form.deviceId"
               class="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
             >
-              <option v-for="d in devices.devices" :key="d.id" :value="d.id">
+              <option v-for="d in (devices.devices || []).filter((d) => d && d.id)" :key="d.id" :value="d.id">
                 {{ d.name }}{{ d.phoneNumber ? ` (${d.phoneNumber})` : '' }}
               </option>
             </select>

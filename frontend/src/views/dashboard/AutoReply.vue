@@ -49,8 +49,9 @@ const enabled = computed(() => current.value?.enabled ?? false)
 
 onMounted(async () => {
   await devices.fetch()
-  if (devices.devices.length && !selectedId.value) {
-    selectedId.value = devices.devices[0].id
+  const validDevices = (devices.devices || []).filter((d) => d && d.id)
+  if (validDevices.length && !selectedId.value) {
+    selectedId.value = validDevices[0].id
   }
 })
 
@@ -193,6 +194,20 @@ async function toggleRuleActive(rule) {
     </Card>
 
     <template v-else>
+      <!-- Device Selector Pills -->
+      <div class="flex items-center gap-2 overflow-x-auto pb-1">
+        <button
+          v-for="d in (devices.devices || []).filter((d) => d && d.id)"
+          :key="d.id"
+          type="button"
+          @click="selectedId = d.id"
+          class="flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold transition-all duration-150 shrink-0"
+          :class="selectedId === d.id ? 'bg-slate-900 text-white shadow-xs' : 'bg-white text-slate-600 border border-slate-200/80 hover:bg-slate-50'"
+        >
+          <Smartphone class="h-3.5 w-3.5" />
+          <span>{{ d.name }}</span>
+        </button>
+      </div>
 
       <!-- Rules list -->
       <div v-if="selectedId && store.loading" class="flex items-center justify-center py-12">

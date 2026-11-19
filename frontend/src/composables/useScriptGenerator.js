@@ -25,14 +25,15 @@ export function useScriptGenerator() {
   // Selected device — required, chosen from the user's connected devices.
   const deviceId = ref('')
   const selectedDevice = computed(() =>
-    devices.devices.find((d) => d.id === deviceId.value),
+    (devices.devices || []).find((d) => d && d.id === deviceId.value),
   )
 
   // Load devices once so both integration pages can populate the selector.
   onMounted(async () => {
     if (!devices.devices.length) await devices.fetch()
-    if (devices.devices.length && !deviceId.value) {
-      deviceId.value = devices.devices[0].id
+    const validDevices = (devices.devices || []).filter((d) => d && d.id)
+    if (validDevices.length && !deviceId.value) {
+      deviceId.value = validDevices[0].id
     }
   })
 
