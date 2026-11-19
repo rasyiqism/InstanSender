@@ -1,0 +1,36 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts",
+    "seed": "bun src/seed.ts",
+    "check": "tsc --noEmit",
+    "test": "bun test",
+    "test:unit": "bun test test/unit",
+    "test:e2e": "bun test test/e2e"
+  },
+  "dependencies": {
+    "@elysiajs/bearer": "^1.2.0",
+    "@elysiajs/cors": "^1.2.0",
+    "@elysiajs/jwt": "^1.2.0",
+    "@elysiajs/static": "^1.2.0",
+    "@elysiajs/swagger": "^1.2.2",
+    "bullmq": "^5.41.0",
+    "drizzle-orm": "^0.40.0",
+    "elysia": "^1.2.25",
+    "ioredis": "^5.5.0",
+    "nodemailer": "^6.10.0",
+    "postgres": "^3.4.5",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.4",
+    "@types/nodemailer": "^6.4.17",
+    "@types/uuid": "^10.0.0",
+    "drizzle-kit": "^0.30.5",
+    "typescript": "^5.8.2"
+  }
+}

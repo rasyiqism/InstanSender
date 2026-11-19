@@ -1,0 +1,64 @@
+# Dependencies
+node_modules/
+*/node_modules/
+.pnp
+.pnp.js
+
+# Build outputs
+dist/
+*/dist/
+.output/
+
+# Environment files
+.env
+.env.*
+!.env.example
+!.env.dokploy.example
+*/.env
+*/.env.*
+!*/.env.example
+
+# Local archives and backups
+.archive/
+*.bak
+package-lock.json.nest.bak
+package.json.nest.bak
+
+# Uploads & Sessions
+uploads/
+backend/uploads/
+wa-sessions.db
+*/wa-sessions.db*
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-journal
+
+# Compiled binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+wa-connector/wa-connector
+wa-connector/wa-connector-*
+wa-connector/*.exe
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# OS & Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.claude/
+*.swp
+*.swo

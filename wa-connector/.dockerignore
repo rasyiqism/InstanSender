@@ -1,0 +1,6 @@
+wa-connector
+wa-connector-linux
+wa-sessions.db
+*.db
+*.db-*
+.DS_Store

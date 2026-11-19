@@ -1,0 +1,115 @@
+services:
+  wa-connector:
+    build:
+      context: ./wa-connector
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8080
+      INTERNAL_TOKEN: ${WA_CONNECTOR_TOKEN:?WA_CONNECTOR_TOKEN is required}
+      SESSION_DB: /data/wa-sessions.db
+      BACKEND_URL: http://backend:3000
+      WA_DEVICE_NAME: ${WA_DEVICE_NAME:-InstanSender}
+      R2_BUCKET: ${R2_BUCKET:-}
+      R2_ENDPOINT: ${R2_ENDPOINT:-}
+      R2_PUBLIC_BASE_URL: ${R2_PUBLIC_BASE_URL:-}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+      TZ: ${TZ:-Asia/Jakarta}
+    volumes:
+      - wa_sessions:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks:
+      - neowa_internal
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["bun", "run", "src/index.ts"]
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      REDIS_URL: ${REDIS_URL:?REDIS_URL is required}
+      DB_SSL: ${DB_SSL:-false}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      APP_URL: ${APP_URL:-http://localhost:5173}
+      WA_CONNECTOR_URL: http://wa-connector:8080
+      WA_CONNECTOR_TOKEN: ${WA_CONNECTOR_TOKEN:?WA_CONNECTOR_TOKEN is required}
+      PROVISIONING_TOKEN: ${PROVISIONING_TOKEN:-}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-}
+      NOTIFICATION_WA_DEVICE_ID: ${NOTIFICATION_WA_DEVICE_ID:-}
+      NOTIFICATION_BRAND_NAME: ${NOTIFICATION_BRAND_NAME:-InstanSender}
+      NOTIFICATION_BRAND_TAGLINE: ${NOTIFICATION_BRAND_TAGLINE:-WhatsApp Notification Gateway}
+      NOTIFICATION_EMAIL_FOOTER: ${NOTIFICATION_EMAIL_FOOTER:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-InstanSender <no-reply@instansender.id>}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
+      UPLOAD_DIR: /app/uploads
+      BANK_NAME: ${BANK_NAME:-BCA}
+      BANK_ACCOUNT_NUMBER: ${BANK_ACCOUNT_NUMBER:-}
+      BANK_ACCOUNT_HOLDER: ${BANK_ACCOUNT_HOLDER:-}
+      TZ: ${TZ:-Asia/Jakarta}
+    volumes:
+      - backend_uploads:/app/uploads
+    depends_on:
+      wa-connector:
+        condition: service_healthy
+    expose:
+      - "3000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bun",
+          "-e",
+          "fetch('http://127.0.0.1:3000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - neowa_internal
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      BACKEND_URL: http://backend:3000
+      VITE_APP_NAME: ${APP_NAME:-InstanSender}
+      VITE_API_BASE_URL: /api
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    networks:
+      - neowa_internal
+
+volumes:
+  wa_sessions:
+  backend_uploads:
+
+networks:
+  neowa_internal:
+    driver: bridge
