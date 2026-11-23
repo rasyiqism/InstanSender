@@ -50,7 +50,12 @@ async function fetchLogs(page = 1) {
     if (filters.search.trim()) params.search = filters.search.trim()
     const { data } = await api.get('/logs/webhooks', { params })
     logs.value = data.data
-    pagination.value = data.pagination
+    pagination.value = data.pagination ?? {
+      page,
+      limit: 25,
+      total: data.total ?? 0,
+      totalPages: Math.ceil((data.total ?? 0) / 25),
+    }
     selectedIds.value = new Set()
   } catch (err) {
     error.value = err.response?.data?.message ?? 'Failed to load webhook logs'

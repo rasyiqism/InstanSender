@@ -37,4 +37,12 @@ describe('Auth Utilities (Unit)', () => {
     expect(apiKey.prefix).toBe(apiKey.key.slice(0, 8));
     expect(apiKey.hash).toBe(hashToken(apiKey.key));
   });
+
+  it('exposes both /auth/me and /auth/profile routes for backward compatibility', async () => {
+    const { authRoutes } = await import('../../src/routes/auth.routes');
+    const paths = authRoutes.routes.map((r: any) => `${r.method} ${r.path}`);
+
+    expect(paths).toContain('GET /auth/me');
+    expect(paths).toContain('GET /auth/profile');
+  });
 });

@@ -158,7 +158,7 @@ Catatan: karena verifikasi manual, tidak perlu integrasi payment gateway (Midtra
 
 ## 16. Tech Stack Usulan
 - **WA Connector Service**: Go + whatsmeow (microservice terpisah, session per device)
-- **Backend Utama**: bebas — Node.js/NestJS, atau PHP (Laravel), berkomunikasi ke WA Connector Service via HTTP internal
+- **Backend Utama**: Bun runtime + ElysiaJS + Drizzle ORM, berkomunikasi ke WA Connector Service via HTTP internal
 - **Queue**: Redis
 - **Database**: PostgreSQL
 - **Frontend Dashboard**: Vue.js 3 (Composition API) + Pinia + Tailwind CSS
@@ -254,7 +254,7 @@ Scaling multi-instance WA Connector Service, analytics lanjutan, opsi payment ga
 Panduan Deploy Neowa ke aaPanel
 Arsitektur deploy yang paling rapi:
 Frontend Vue: static files di Nginx aaPanel.
-Backend NestJS: Node service port 3000.
+Backend Bun + Elysia: Bun runtime service port 3000.
 WA Connector Go: internal service port 8080.
 PostgreSQL: database utama.
 Redis: queue/rate limit.
@@ -264,13 +264,11 @@ Install dari App Store aaPanel:
 Nginx
 PostgreSQL
 Redis
-Node.js Manager, gunakan Node 22 LTS atau lebih baru
-PM2 Manager / Node Project Manager
-Supervisor Manager, untuk WA Connector Go
+Bun runtime (curl -fsSL https://bun.sh/install | bash)
+Supervisor Manager, untuk WA Connector Go dan Backend Bun
 Go compiler, bisa via terminal kalau belum ada
 Cek versi:
-node -v
-npm -v
+bun -v
 go version
 redis-cli ping
 2. Upload Project
@@ -288,11 +286,10 @@ CREATE USER neowa_user WITH PASSWORD 'password-kuat';
 GRANT ALL PRIVILEGES ON DATABASE neowa TO neowa_user;
 Connection string nanti:
 DATABASE_URL=postgres://neowa_user:password-kuat@127.0.0.1:5432/neowa
-4. Deploy Backend NestJS
+4. Deploy Backend Bun + Elysia
 Masuk folder backend:
 cd /www/wwwroot/neowa-api/backend
-npm install
-npm run build
+bun install --production
 Buat file .env:
 PORT=3000
 NODE_ENV=production
@@ -300,10 +297,9 @@ NODE_ENV=production
 DATABASE_URL=postgres://neowa_user:password-kuat@127.0.0.1:5432/neowa
 
 JWT_SECRET=ganti-dengan-random-secret-panjang
-JWT_EXPIRES_IN=1d
+JWT_EXPIRES_IN=7d
 
-REDIS_HOST=127.0.0.1
-REDIS_PORT=6379
+REDIS_URL=redis://127.0.0.1:6379
 
 WA_CONNECTOR_URL=http://127.0.0.1:8080
 WA_CONNECTOR_TOKEN=ganti-token-internal-panjang-sama-dengan-connector
@@ -313,20 +309,24 @@ BANK_ACCOUNT_NUMBER=1234567890
 BANK_ACCOUNT_HOLDER=PT Neowa Indonesia
 
 UPLOAD_DIR=/www/wwwroot/neowa-api/backend/uploads
-Catatan penting: project ini belum terlihat punya migration. Karena NODE_ENV=production membuat TypeORM synchronize=false, tabel tidak akan otomatis dibuat. Untuk deploy pertama, jalankan sementara:
-NODE_ENV=development npm run start:prod
-Tunggu tabel dibuat, stop proses, lalu jalankan normal dengan NODE_ENV=production.
-Seed admin/package:
-npm run seed
+
+Migrasi schema database dengan Drizzle:
+bun run db:push
+
+Seed data awal (admin & paket):
+bun run seed
+
 Default admin dari project:
 admin@neowa.id / admin12345
 Ganti password admin setelah login.
-Jalankan backend via PM2:
-pm2 start dist/main.js --name neowa-backend
+
+Jalankan backend via Supervisor aaPanel atau PM2:
+pm2 start "bun src/index.ts" --name neowa-backend
 pm2 save
 pm2 startup
-Cek:
-curl http://127.0.0.1:3000/packages
+
+Cek health:
+curl http://127.0.0.1:3000/health
 5. Deploy WA Connector
 Masuk folder connector:
 cd /www/wwwroot/neowa-api/wa-connector

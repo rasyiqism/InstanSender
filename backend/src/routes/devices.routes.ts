@@ -5,6 +5,12 @@ import { authContext } from '../common/middleware';
 import { waClient } from '../common/wa-client';
 import { dispatchWebhook } from '../common/webhooks';
 import { config } from '../config';
+import { personalize } from '../common/template';
+
+/** Extract numeric phone number from WhatsApp JID */
+export function stripJid(jid: string): string {
+  return (jid || '').split('@')[0].split(':')[0].replace(/[^\d]/g, '');
+}
 
 export const deviceRoutes = new Elysia({ prefix: '/devices' })
   .use(authContext)
@@ -199,13 +205,15 @@ export const deviceRoutes = new Elysia({ prefix: '/devices' })
       return { error: 'Unauthorized internal token' };
     }
 
-    const { deviceId, from, sender, message, mediaUrl, isGroup } = body as {
+    const { deviceId, from, sender, message, mediaUrl, isGroup, pushName, fromMe } = body as {
       deviceId: string;
       from: string;
       sender?: string;
       message?: string;
       mediaUrl?: string;
       isGroup?: boolean;
+      pushName?: string;
+      fromMe?: boolean;
     };
 
     const [device] = await db
@@ -224,10 +232,11 @@ export const deviceRoutes = new Elysia({ prefix: '/devices' })
       message,
       mediaUrl,
       isGroup,
+      fromMe: !!fromMe,
     });
 
-    // Auto reply processing (only for private 1-on-1 chats and when enabled)
-    if (!isGroup && device.autoReplyEnabled && message) {
+    // Auto reply processing (only for incoming 1-on-1 chats not from self and when enabled)
+    if (!fromMe && !isGroup && device.autoReplyEnabled && message) {
       const rules = await db
         .select()
         .from(schema.autoReplyRules)
@@ -252,11 +261,18 @@ export const deviceRoutes = new Elysia({ prefix: '/devices' })
         if (matched) {
           // Send auto reply response
           try {
+            const cleanTarget = stripJid(from);
+            if (!cleanTarget || !/^\d{8,16}$/.test(cleanTarget)) {
+              console.warn(`[AutoReply] Skipped: invalid recipient from=${from}`);
+              break;
+            }
+            const senderName = pushName || sender || cleanTarget;
+            const personalizedReply = personalize(rule.reply, senderName);
             await waClient.sendMessage({
               deviceId,
-              to: from,
+              to: cleanTarget,
               type: 'text',
-              message: rule.reply,
+              message: personalizedReply,
             });
           } catch (err: any) {
             console.error(`[AutoReply] Failed to send reply to ${from}:`, err.message);

@@ -43,7 +43,7 @@ const langs = [
 ]
 
 const textExamples = computed(() => ({
-  curl: `curl -X POST ${baseUrl.value}/messages/send \\
+  curl: `curl -X POST ${baseUrl.value}/v1/messages/send \\
   -H "Authorization: Bearer YOUR_API_TOKEN" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -51,7 +51,7 @@ const textExamples = computed(() => ({
     "to": "6281234567890",
     "message": "Halo, ini pesan dari API Gateway!"
   }'`,
-  js: `const res = await fetch("${baseUrl.value}/messages/send", {
+  js: `const res = await fetch("${baseUrl.value}/v1/messages/send", {
   method: "POST",
   headers: {
     "Authorization": "Bearer YOUR_API_TOKEN",
@@ -67,7 +67,7 @@ const textExamples = computed(() => ({
 const data = await res.json();
 console.log(data);`,
   php: `<?php
-$ch = curl_init("${baseUrl.value}/messages/send");
+$ch = curl_init("${baseUrl.value}/v1/messages/send");
 curl_setopt($ch, CURLOPT_POST, true);
 curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 curl_setopt($ch, CURLOPT_HTTPHEADER, [
@@ -86,7 +86,7 @@ echo $response;`,
 }))
 
 const imageExamples = computed(() => ({
-  curl: `curl -X POST ${baseUrl.value}/messages/send-media \\
+  curl: `curl -X POST ${baseUrl.value}/v1/messages/send-media \\
   -H "Authorization: Bearer YOUR_API_TOKEN" \\
   -F "deviceId=DEVICE_ID" \\
   -F "to=6281234567890" \\
@@ -98,7 +98,7 @@ form.append("to", "6281234567890");
 form.append("caption", "Ini caption gambar");
 form.append("media", fileInput.files[0]);
 
-const res = await fetch("${baseUrl.value}/messages/send-media", {
+const res = await fetch("${baseUrl.value}/v1/messages/send-media", {
   method: "POST",
   headers: {
     "Authorization": "Bearer YOUR_API_TOKEN",
@@ -110,7 +110,7 @@ const res = await fetch("${baseUrl.value}/messages/send-media", {
 const data = await res.json();
 console.log(data);`,
   php: `<?php
-$ch = curl_init("${baseUrl.value}/messages/send-media");
+$ch = curl_init("${baseUrl.value}/v1/messages/send-media");
 curl_setopt($ch, CURLOPT_POST, true);
 curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 curl_setopt($ch, CURLOPT_HTTPHEADER, [
@@ -253,7 +253,7 @@ const sections = [
           <div class="space-y-4 p-5">
             <p class="text-sm leading-relaxed text-slate-600">
               Kirim pesan teks WhatsApp ke nomor tujuan. Endpoint:
-              <code class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-primary">/messages/send</code>
+              <code class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-primary">/v1/messages/send</code>
             </p>
 
             <!-- Parameters -->
@@ -328,7 +328,7 @@ const sections = [
           <div class="space-y-4 p-5">
             <p class="text-sm leading-relaxed text-slate-600">
               Kirim gambar dengan caption ke nomor tujuan. Endpoint:
-              <code class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-primary">/messages/send-media</code>
+              <code class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-primary">/v1/messages/send-media</code>
               <span class="ml-1 text-xs text-slate-400">(multipart/form-data)</span>
             </p>
 

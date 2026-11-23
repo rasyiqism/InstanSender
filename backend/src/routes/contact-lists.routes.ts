@@ -109,6 +109,16 @@ export const contactListRoutes = new Elysia({ prefix: '/contact-lists' })
       }
 
       const rawPhone = body.phoneNumber.replace(/[^\d+]/g, '');
+      const [existing] = await db
+        .select()
+        .from(schema.contacts)
+        .where(and(eq(schema.contacts.contactListId, params.id), eq(schema.contacts.phoneNumber, rawPhone)))
+        .limit(1);
+
+      if (existing) {
+        return existing;
+      }
+
       const [contact] = await db
         .insert(schema.contacts)
         .values({
@@ -185,12 +195,20 @@ export const contactListRoutes = new Elysia({ prefix: '/contact-lists' })
         startIndex = 1;
       }
 
+      const existingContacts = await db
+        .select({ phoneNumber: schema.contacts.phoneNumber })
+        .from(schema.contacts)
+        .where(eq(schema.contacts.contactListId, params.id));
+      const existingSet = new Set(existingContacts.map((c) => c.phoneNumber));
+      const seenInCsv = new Set<string>();
+
       for (let i = startIndex; i < lines.length; i++) {
         const parts = lines[i].split(',').map((p) => p.trim().replace(/^["']|["']$/g, ''));
         if (parts.length >= 1) {
           const rawPhone = parts[0].replace(/[^\d+]/g, '');
           const name = parts[1] || null;
-          if (rawPhone.length >= 6) {
+          if (rawPhone.length >= 6 && !existingSet.has(rawPhone) && !seenInCsv.has(rawPhone)) {
+            seenInCsv.add(rawPhone);
             toInsert.push({
               contactListId: params.id,
               phoneNumber: rawPhone,
@@ -217,4 +235,35 @@ export const contactListRoutes = new Elysia({ prefix: '/contact-lists' })
         file: t.File(),
       }),
     },
-  );
+  )
+  // 8. Export contacts as CSV
+  .get('/:id/export-csv', async ({ params, getAuthUser, set }) => {
+    const user = await getAuthUser();
+    const [list] = await db
+      .select()
+      .from(schema.contactLists)
+      .where(and(eq(schema.contactLists.id, params.id), eq(schema.contactLists.userId, user.id)))
+      .limit(1);
+
+    if (!list) {
+      set.status = 404;
+      return { message: 'Daftar kontak tidak ditemukan' };
+    }
+
+    const contactsList = await db
+      .select()
+      .from(schema.contacts)
+      .where(eq(schema.contacts.contactListId, params.id))
+      .orderBy(schema.contacts.createdAt);
+
+    const safeFilename = (list.name || 'contacts').replace(/[^a-zA-Z0-9_-]/g, '_');
+    set.headers['Content-Type'] = 'text/csv; charset=utf-8';
+    set.headers['Content-Disposition'] = `attachment; filename="${safeFilename}.csv"`;
+
+    const header = 'Phone Number,Name\n';
+    const rows = contactsList
+      .map((c) => `"${c.phoneNumber}","${(c.name || '').replace(/"/g, '""')}"`)
+      .join('\n');
+
+    return header + rows;
+  });

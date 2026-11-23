@@ -38,6 +38,7 @@ const route = useRoute();
 const mainNav = [
   { to: "/", label: "Overview", icon: LayoutDashboard },
   { to: "/devices", label: "Devices", icon: Smartphone },
+  { to: "/groups", label: "Grup WhatsApp", icon: Users },
   { to: "/auto-reply", label: "Auto Reply", icon: Reply },
   { to: "/contact-lists", label: "Contact Lists", icon: ContactIcon },
   { to: "/broadcasts", label: "Broadcasts", icon: Megaphone },

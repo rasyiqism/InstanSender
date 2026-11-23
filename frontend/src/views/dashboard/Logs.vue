@@ -31,7 +31,12 @@ async function fetchLogs(page = 1) {
     if (statusFilter.value) params.status = statusFilter.value
     const { data } = await api.get('/logs', { params })
     logs.value = data.data
-    pagination.value = data.pagination
+    pagination.value = data.pagination ?? {
+      page,
+      limit: 25,
+      total: data.total ?? 0,
+      totalPages: Math.ceil((data.total ?? 0) / 25),
+    }
     selectedIds.value = new Set()
   } catch (err) {
     error.value = err.response?.data?.message ?? 'Failed to load message logs'

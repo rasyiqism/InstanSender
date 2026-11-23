@@ -13,21 +13,32 @@ import {
 } from 'lucide-vue-next'
 import { useDeviceStore } from '../../stores/device'
 import { useBillingStore } from '../../stores/billing'
+import { useAuthStore } from '../../stores/auth'
 import api from '../../services/api'
 import Card from '../../components/ui/Card.vue'
 import Badge from '../../components/ui/Badge.vue'
 import Button from '../../components/ui/Button.vue'
 
+const authStore = useAuthStore()
 const deviceStore = useDeviceStore()
 const billingStore = useBillingStore()
 const logCount = ref(0)
+const adminAnalytics = ref(null)
 const loading = ref(true)
 
 onMounted(async () => {
   try {
-    await Promise.all([deviceStore.fetch(), billingStore.fetchSubscription()])
+    const tasks = [deviceStore.fetch(), billingStore.fetchSubscription()]
+    if (authStore.isAdmin) {
+      tasks.push(
+        api.get('/admin/analytics').then(({ data }) => {
+          adminAnalytics.value = data
+        }),
+      )
+    }
+    await Promise.allSettled(tasks)
     const { data } = await api.get('/logs?limit=1')
-    logCount.value = data.pagination?.total ?? 0
+    logCount.value = data.pagination?.total ?? data.total ?? 0
   } catch {
     /* ignore */
   } finally {
@@ -72,6 +83,45 @@ const quickActions = [
           <span>Tambah</span>
         </Button>
       </router-link>
+    </div>
+
+    <!-- Super Admin Platform Analytics -->
+    <div v-if="authStore.isAdmin && adminAnalytics" class="rounded-2xl border border-indigo-100 bg-linear-to-br from-indigo-50/70 via-white to-emerald-50/40 p-5 shadow-xs">
+      <div class="mb-4 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-white">
+            <Activity class="h-4 w-4" />
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-slate-900 tracking-tight">Platform Analytics (Admin)</h3>
+            <p class="text-xs text-slate-500">Ringkasan performa seluruh sistem dan transaksi</p>
+          </div>
+        </div>
+        <router-link to="/admin/payments" class="text-xs font-semibold text-indigo-600 hover:underline">
+          Lihat Transaksi &rarr;
+        </router-link>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div class="rounded-xl border border-slate-100 bg-white/90 p-3.5">
+          <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Total Omzet</p>
+          <p class="mt-1 text-lg font-extrabold text-slate-900 font-mono">
+            {{ new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(adminAnalytics.totalRevenue) }}
+          </p>
+        </div>
+        <div class="rounded-xl border border-slate-100 bg-white/90 p-3.5">
+          <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Total Pengguna</p>
+          <p class="mt-1 text-lg font-extrabold text-slate-900 font-mono">{{ adminAnalytics.totalUsers }} user</p>
+        </div>
+        <div class="rounded-xl border border-slate-100 bg-white/90 p-3.5">
+          <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Perangkat Aktif</p>
+          <p class="mt-1 text-lg font-extrabold text-slate-900 font-mono">{{ adminAnalytics.activeDevices }} online</p>
+        </div>
+        <div class="rounded-xl border border-slate-100 bg-white/90 p-3.5">
+          <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Pesan Terkirim</p>
+          <p class="mt-1 text-lg font-extrabold text-slate-900 font-mono">{{ adminAnalytics.sentMessages }} / {{ adminAnalytics.totalMessages }}</p>
+        </div>
+      </div>
     </div>
 
     <!-- Quick Action Cards (Tactile micro-interaction) -->

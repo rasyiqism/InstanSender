@@ -43,6 +43,17 @@ export const useAgencyStore = defineStore('agency', () => {
     return data
   }
 
+  async function deleteUser(id) {
+    const { data } = await api.delete(`/agency/users/${id}`)
+    users.value = users.value.filter((u) => u.id !== id)
+    return data
+  }
+
+  async function fetchUserDevices(id) {
+    const { data } = await api.get(`/agency/users/${id}/devices`)
+    return data
+  }
+
   // ---- Public: agency packages for registration ----
   async function fetchAgencyPackagesPublic() {
     // no auth needed — but backend doesn't have a public list endpoint,
@@ -104,6 +115,8 @@ export const useAgencyStore = defineStore('agency', () => {
     renewUser,
     suspendUser,
     activateUser,
+    deleteUser,
+    fetchUserDevices,
     adminFetchAgencyPackages,
     adminCreateAgencyPackage,
     adminDeleteAgencyPackage,

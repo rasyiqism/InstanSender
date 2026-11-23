@@ -11,6 +11,7 @@ import {
   Plus,
   Trash2,
   Upload,
+  Download,
   ArrowLeft,
   X,
   Phone,
@@ -30,6 +31,7 @@ const addModal = ref(false)
 const importModal = ref(false)
 const deleteModal = ref({ open: false, contact: null })
 const importResult = ref(null)
+const exporting = ref(false)
 
 const form = reactive({ phoneNumber: '', name: '' })
 const fileInput = ref(null)
@@ -44,6 +46,18 @@ async function loadList() {
     list.value = await store.getContactList(listId)
   } catch (err) {
     error.value = err.response?.data?.message ?? 'Gagal memuat contact list'
+  }
+}
+
+async function handleExport() {
+  exporting.value = true
+  error.value = ''
+  try {
+    await store.exportCsv(listId)
+  } catch (err) {
+    error.value = err.response?.data?.message ?? 'Gagal export CSV'
+  } finally {
+    exporting.value = false
   }
 }
 
@@ -128,6 +142,10 @@ async function confirmDelete() {
           {{ list?.contacts?.length ?? 0 }} kontak
         </p>
       </div>
+      <Button variant="outline" :disabled="exporting || !list?.contacts?.length" @click="handleExport">
+        <Download class="h-4 w-4" />
+        {{ exporting ? 'Mengunduh...' : 'Export CSV' }}
+      </Button>
       <Button variant="outline" @click="openImport">
         <Upload class="h-4 w-4" />
         Import CSV

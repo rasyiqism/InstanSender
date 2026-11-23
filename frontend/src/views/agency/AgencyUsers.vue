@@ -6,13 +6,15 @@ import Button from '../../components/ui/Button.vue'
 import Card from '../../components/ui/Card.vue'
 import Badge from '../../components/ui/Badge.vue'
 import Alert from '../../components/ui/Alert.vue'
-import { Loader2, Plus, Users, RefreshCw, X } from 'lucide-vue-next'
+import { Loader2, Plus, Users, RefreshCw, X, Smartphone, Trash2 } from 'lucide-vue-next'
 
 const router = useRouter()
 const store = useAgencyStore()
 const error = ref('')
 const loading = ref(false)
 const renewModal = ref({ open: false, user: null })
+const devicesModal = ref({ open: false, user: null, devices: [], loading: false })
+const deleteModal = ref({ open: false, user: null, deleting: false })
 
 onMounted(() => load())
 
@@ -54,6 +56,32 @@ async function confirmRenew() {
     await load()
   } catch (err) {
     error.value = err.response?.data?.message ?? 'Gagal renew user'
+  }
+}
+
+async function openDevices(user) {
+  devicesModal.value = { open: true, user, devices: [], loading: true }
+  try {
+    const data = await store.fetchUserDevices(user.id)
+    devicesModal.value.devices = data || []
+  } catch (err) {
+    error.value = err.response?.data?.message ?? 'Gagal memuat perangkat user'
+  } finally {
+    devicesModal.value.loading = false
+  }
+}
+
+async function confirmDeleteUser() {
+  if (!deleteModal.value.user) return
+  deleteModal.value.deleting = true
+  error.value = ''
+  try {
+    await store.deleteUser(deleteModal.value.user.id)
+    deleteModal.value = { open: false, user: null, deleting: false }
+    await load()
+  } catch (err) {
+    error.value = err.response?.data?.message ?? 'Gagal menghapus user'
+    deleteModal.value.deleting = false
   }
 }
 
@@ -128,10 +156,12 @@ function formatDate(d) {
               <td class="px-5 py-3 text-slate-500">{{ formatDate(u.subscriptionEnd) }}</td>
               <td class="px-5 py-3">
                 <div class="flex justify-end gap-1">
+                  <button class="rounded-lg px-2 py-1 text-xs text-slate-600 hover:bg-slate-100" @click="openDevices(u)">Devices</button>
                   <button class="rounded-lg px-2 py-1 text-xs text-slate-600 hover:bg-slate-100" @click="openRenew(u)">Renew</button>
                   <button class="rounded-lg px-2 py-1 text-xs hover:bg-slate-100" :class="u.suspended ? 'text-green-600' : 'text-amber-600'" @click="toggleSuspend(u)">
                     {{ u.suspended ? 'Activate' : 'Suspend' }}
                   </button>
+                  <button class="rounded-lg px-2 py-1 text-xs text-rose-600 hover:bg-rose-50" @click="deleteModal = { open: true, user: u, deleting: false }">Delete</button>
                 </div>
               </td>
             </tr>
@@ -154,6 +184,70 @@ function formatDate(d) {
         <div class="flex justify-end gap-2 border-t border-slate-100 px-5 py-4">
           <Button variant="outline" @click="renewModal.open = false">Batal</Button>
           <Button @click="confirmRenew">Konfirmasi Renew</Button>
+        </div>
+      </Card>
+    </div>
+
+    <!-- Devices modal -->
+    <div v-if="devicesModal.open" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" @click.self="devicesModal.open = false">
+      <Card class="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto p-0 shadow-2xl">
+        <div class="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+          <div>
+            <h3 class="font-semibold text-slate-900">Perangkat: {{ devicesModal.user?.name }}</h3>
+            <p class="text-xs text-slate-400 font-mono">{{ devicesModal.devices.length }} / {{ devicesModal.user?.maxDevice }} perangkat terdaftar</p>
+          </div>
+          <Button variant="ghost" size="icon" @click="devicesModal.open = false"><X class="h-4 w-4" /></Button>
+        </div>
+        <div class="p-5">
+          <div v-if="devicesModal.loading" class="flex items-center justify-center py-6">
+            <Loader2 class="h-5 w-5 animate-spin text-primary" />
+            <span class="ml-2 text-sm text-slate-500">Memuat perangkat...</span>
+          </div>
+          <div v-else-if="devicesModal.devices.length === 0" class="py-6 text-center text-sm text-slate-500">
+            User belum menghubungkan perangkat WhatsApp.
+          </div>
+          <div v-else class="space-y-3">
+            <div v-for="d in devicesModal.devices" :key="d.id" class="flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50 p-3">
+              <div class="flex items-center gap-2.5">
+                <Smartphone class="h-4 w-4 text-slate-500" />
+                <div>
+                  <p class="text-sm font-semibold text-slate-900">{{ d.name }}</p>
+                  <p class="text-xs font-mono text-slate-400">{{ d.phoneNumber || 'Scan QR pending' }}</p>
+                </div>
+              </div>
+              <Badge :variant="d.status === 'connected' ? 'success' : d.status === 'pending_qr' ? 'warning' : 'destructive'">
+                {{ d.status }}
+              </Badge>
+            </div>
+          </div>
+        </div>
+        <div class="flex justify-end border-t border-slate-100 px-5 py-4">
+          <Button variant="outline" @click="devicesModal.open = false">Tutup</Button>
+        </div>
+      </Card>
+    </div>
+
+    <!-- Delete user confirmation modal -->
+    <div v-if="deleteModal.open" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" @click.self="deleteModal.open = false">
+      <Card class="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto p-0 shadow-2xl">
+        <div class="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+          <h3 class="font-semibold text-rose-600">Hapus Sub-User</h3>
+          <Button variant="ghost" size="icon" @click="deleteModal.open = false"><X class="h-4 w-4" /></Button>
+        </div>
+        <div class="p-5">
+          <p class="text-sm text-slate-700">
+            Apakah Anda yakin ingin menghapus user <strong>{{ deleteModal.user?.name }}</strong> ({{ deleteModal.user?.email }})?
+          </p>
+          <p class="mt-2 text-xs text-slate-500">
+            Seluruh data perangkat dan kuota akun ini akan dihapus, dan 1 kuota aktivasi Anda akan dikembalikan.
+          </p>
+        </div>
+        <div class="flex justify-end gap-2 border-t border-slate-100 px-5 py-4">
+          <Button variant="outline" :disabled="deleteModal.deleting" @click="deleteModal.open = false">Batal</Button>
+          <Button variant="destructive" :disabled="deleteModal.deleting" @click="confirmDeleteUser">
+            <Loader2 v-if="deleteModal.deleting" class="h-4 w-4 animate-spin" />
+            <span v-else>Hapus User</span>
+          </Button>
         </div>
       </Card>
     </div>

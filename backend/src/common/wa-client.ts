@@ -8,6 +8,7 @@ class WaConnectorClient {
   private headers() {
     return {
       'Content-Type': 'application/json',
+      'Authorization': `Bearer ${config.waConnectorToken}`,
       'X-Internal-Token': config.waConnectorToken,
     };
   }
@@ -97,12 +98,13 @@ class WaConnectorClient {
       headers: this.headers(),
     });
     if (!res.ok) return [];
-    return (await res.json()) as any[];
+    const data = (await res.json()) as any;
+    return Array.isArray(data) ? data : (data?.groups || []);
   }
 
   async getGroupMembers(deviceId: string, groupId: string): Promise<any[]> {
     const res = await fetch(
-      `${this.baseUrl}/internal/wa/group/members?deviceId=${encodeURIComponent(deviceId)}&groupId=${encodeURIComponent(groupId)}`,
+      `${this.baseUrl}/internal/wa/group/members?deviceId=${encodeURIComponent(deviceId)}&jid=${encodeURIComponent(groupId)}&groupId=${encodeURIComponent(groupId)}`,
       { headers: this.headers() },
     );
     if (!res.ok) return [];

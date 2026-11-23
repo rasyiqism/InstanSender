@@ -1,8 +1,9 @@
 import { Elysia, t } from 'elysia';
 import { db, schema } from '../db';
-import { eq, desc } from 'drizzle-orm';
+import { eq, and, desc, sql } from 'drizzle-orm';
 import { authContext } from '../common/middleware';
 import { hashPassword } from '../common/auth';
+import { sendEmail } from '../common/mailer';
 
 function formatAgencyPackage(pkg: typeof schema.agencyPackages.$inferSelect) {
   return {
@@ -119,19 +120,24 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
     },
   )
   .delete('/users/:id', async ({ params, getAdminUser, set }) => {
-    await getAdminUser();
+    const admin = await getAdminUser();
+    if (admin.id === params.id) {
+      set.status = 403;
+      return { message: 'Admin tidak dapat menghapus akunnya sendiri' };
+    }
     await db.delete(schema.users).where(eq(schema.users.id, params.id));
     return { success: true };
   })
 
   // 2. Payments & Verifications
-  .get('/payments', async ({ getAdminUser }) => {
+  .get('/payments/pending', async ({ getAdminUser }) => {
     await getAdminUser();
-    const paymentsList = await db
+    const pendingPayments = await db
       .select({
         id: schema.payments.id,
         userId: schema.payments.userId,
         subscriptionId: schema.payments.subscriptionId,
+        agencySubscriptionId: schema.payments.agencySubscriptionId,
         amount: schema.payments.amount,
         kodeUnik: schema.payments.kodeUnik,
         bankAccountTujuan: schema.payments.bankAccountTujuan,
@@ -146,6 +152,38 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
       })
       .from(schema.payments)
       .leftJoin(schema.users, eq(schema.users.id, schema.payments.userId))
+      .where(eq(schema.payments.status, 'pending'))
+      .orderBy(desc(schema.payments.createdAt));
+
+    return pendingPayments;
+  })
+  .get('/payments', async ({ query, getAdminUser }) => {
+    await getAdminUser();
+    const statusParam = (query as any)?.status;
+    const whereClause =
+      statusParam && statusParam !== 'all' ? eq(schema.payments.status, statusParam) : undefined;
+
+    const paymentsList = await db
+      .select({
+        id: schema.payments.id,
+        userId: schema.payments.userId,
+        subscriptionId: schema.payments.subscriptionId,
+        agencySubscriptionId: schema.payments.agencySubscriptionId,
+        amount: schema.payments.amount,
+        kodeUnik: schema.payments.kodeUnik,
+        bankAccountTujuan: schema.payments.bankAccountTujuan,
+        buktiTransferUrl: schema.payments.buktiTransferUrl,
+        status: schema.payments.status,
+        rejectionReason: schema.payments.rejectionReason,
+        verifiedBy: schema.payments.verifiedBy,
+        verifiedAt: schema.payments.verifiedAt,
+        createdAt: schema.payments.createdAt,
+        userEmail: schema.users.email,
+        userName: schema.users.name,
+      })
+      .from(schema.payments)
+      .leftJoin(schema.users, eq(schema.users.id, schema.payments.userId))
+      .where(whereClause)
       .orderBy(desc(schema.payments.createdAt));
 
     return paymentsList;
@@ -164,43 +202,74 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
     }
 
     const now = new Date();
-    await db
-      .update(schema.payments)
-      .set({
-        status: 'paid',
-        verifiedBy: admin.email,
-        verifiedAt: now,
-      })
-      .where(eq(schema.payments.id, params.id));
+    await db.transaction(async (tx) => {
+      await tx
+        .update(schema.payments)
+        .set({
+          status: 'paid',
+          verifiedBy: admin.email,
+          verifiedAt: now,
+        })
+        .where(eq(schema.payments.id, params.id));
 
-    // Activate subscription if attached
-    if (payment.subscriptionId) {
-      const [sub] = await db
-        .select()
-        .from(schema.subscriptions)
-        .where(eq(schema.subscriptions.id, payment.subscriptionId))
-        .limit(1);
-
-      if (sub) {
-        const [pkg] = await db
+      // Activate subscription if attached
+      if (payment.subscriptionId) {
+        const [sub] = await tx
           .select()
-          .from(schema.packages)
-          .where(eq(schema.packages.id, sub.packageId))
+          .from(schema.subscriptions)
+          .where(eq(schema.subscriptions.id, payment.subscriptionId))
           .limit(1);
 
-        const duration = pkg?.durationDays || 30;
-        const endDate = new Date(now.getTime() + duration * 86400000);
+        if (sub) {
+          const [pkg] = await tx
+            .select()
+            .from(schema.packages)
+            .where(eq(schema.packages.id, sub.packageId))
+            .limit(1);
 
-        await db
-          .update(schema.subscriptions)
-          .set({
-            status: 'active',
-            startDate: now,
-            endDate,
-          })
-          .where(eq(schema.subscriptions.id, sub.id));
+          const duration = pkg?.durationDays || 30;
+          const endDate = new Date(now.getTime() + duration * 86400000);
+
+          await tx
+            .update(schema.subscriptions)
+            .set({
+              status: 'active',
+              startDate: now,
+              endDate,
+            })
+            .where(eq(schema.subscriptions.id, sub.id));
+        }
       }
-    }
+
+      // Activate agency subscription if attached
+      if (payment.agencySubscriptionId) {
+        const [agencySub] = await tx
+          .select()
+          .from(schema.agencySubscriptions)
+          .where(eq(schema.agencySubscriptions.id, payment.agencySubscriptionId))
+          .limit(1);
+
+        if (agencySub) {
+          const [agencyPkg] = await tx
+            .select()
+            .from(schema.agencyPackages)
+            .where(eq(schema.agencyPackages.id, agencySub.packageId))
+            .limit(1);
+
+          const duration = agencyPkg?.durationDays || 30;
+          const expiresAt = new Date(now.getTime() + duration * 86400000);
+
+          await tx
+            .update(schema.agencySubscriptions)
+            .set({
+              status: 'active',
+              startsAt: now,
+              expiresAt,
+            })
+            .where(eq(schema.agencySubscriptions.id, agencySub.id));
+        }
+      }
+    });
 
     return { success: true, message: 'Pembayaran berhasil disetujui' };
   })
@@ -244,6 +313,141 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
     await db.delete(schema.payments).where(eq(schema.payments.id, params.id));
     return { success: true };
   })
+  // Create Manual Payment
+  .post(
+    '/payments',
+    async ({ body, getAdminUser }) => {
+      const admin = await getAdminUser();
+      const { userId, amount, bankAccountTujuan, kodeUnik, subscriptionId, status, rejectionReason } = body;
+
+      const [payment] = await db
+        .insert(schema.payments)
+        .values({
+          userId,
+          subscriptionId: subscriptionId || null,
+          amount: Number(amount),
+          kodeUnik: kodeUnik || 0,
+          bankAccountTujuan,
+          status: status || 'pending',
+          rejectionReason: rejectionReason || null,
+          verifiedBy: status === 'paid' ? admin.email : null,
+          verifiedAt: status === 'paid' ? new Date() : null,
+        })
+        .returning();
+
+      return payment;
+    },
+    {
+      body: t.Object({
+        userId: t.String(),
+        amount: t.Number(),
+        bankAccountTujuan: t.String(),
+        kodeUnik: t.Optional(t.Number()),
+        subscriptionId: t.Optional(t.String()),
+        status: t.Optional(t.Union([t.Literal('pending'), t.Literal('paid'), t.Literal('rejected')])),
+        rejectionReason: t.Optional(t.String()),
+      }),
+    },
+  )
+  // Update Payment Details
+  .patch(
+    '/payments/:id',
+    async ({ params, body, getAdminUser, set }) => {
+      await getAdminUser();
+      const [existing] = await db.select().from(schema.payments).where(eq(schema.payments.id, params.id)).limit(1);
+      if (!existing) {
+        set.status = 404;
+        return { message: 'Pembayaran tidak ditemukan' };
+      }
+
+      const updateData: any = {};
+      if (body.amount !== undefined) updateData.amount = body.amount;
+      if (body.kodeUnik !== undefined) updateData.kodeUnik = body.kodeUnik;
+      if (body.bankAccountTujuan !== undefined) updateData.bankAccountTujuan = body.bankAccountTujuan;
+      if (body.status !== undefined) updateData.status = body.status;
+      if (body.rejectionReason !== undefined) updateData.rejectionReason = body.rejectionReason;
+
+      const [updated] = await db
+        .update(schema.payments)
+        .set(updateData)
+        .where(eq(schema.payments.id, params.id))
+        .returning();
+
+      return updated;
+    },
+    {
+      body: t.Object({
+        amount: t.Optional(t.Number()),
+        kodeUnik: t.Optional(t.Number()),
+        bankAccountTujuan: t.Optional(t.String()),
+        status: t.Optional(t.Union([t.Literal('pending'), t.Literal('paid'), t.Literal('rejected')])),
+        rejectionReason: t.Optional(t.String()),
+      }),
+    },
+  )
+  // Direct Subscription Creation for User
+  .post(
+    '/subscriptions',
+    async ({ body, getAdminUser, set }) => {
+      const admin = await getAdminUser();
+      const { userId, packageId, durationDays } = body;
+
+      const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+      if (!user) {
+        set.status = 404;
+        return { message: 'User tidak ditemukan' };
+      }
+
+      const [pkg] = await db.select().from(schema.packages).where(eq(schema.packages.id, packageId)).limit(1);
+      if (!pkg) {
+        set.status = 404;
+        return { message: 'Paket tidak ditemukan' };
+      }
+
+      const now = new Date();
+      const days = durationDays || pkg.durationDays || 30;
+      const endDate = new Date(now.getTime() + days * 86400000);
+
+      const [sub] = await db
+        .insert(schema.subscriptions)
+        .values({
+          userId: user.id,
+          packageId: pkg.id,
+          status: 'active',
+          startDate: now,
+          endDate,
+          messagesUsed: 0,
+        })
+        .returning();
+
+      const [payment] = await db
+        .insert(schema.payments)
+        .values({
+          userId: user.id,
+          subscriptionId: sub.id,
+          amount: pkg.price,
+          kodeUnik: 0,
+          bankAccountTujuan: `Direct Admin Activation (${admin.email})`,
+          status: 'paid',
+          verifiedBy: admin.email,
+          verifiedAt: now,
+        })
+        .returning();
+
+      return {
+        subscription: sub,
+        payment,
+        package: pkg,
+      };
+    },
+    {
+      body: t.Object({
+        userId: t.String(),
+        packageId: t.String(),
+        durationDays: t.Optional(t.Number()),
+      }),
+    },
+  )
 
   // 3. Retail Packages Management
   .get('/packages', async ({ getAdminUser }) => {
@@ -316,8 +520,19 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
       }),
     },
   )
-  .delete('/packages/:id', async ({ params, getAdminUser }) => {
+  .delete('/packages/:id', async ({ params, getAdminUser, set }) => {
     await getAdminUser();
+    const [activeSub] = await db
+      .select({ id: schema.subscriptions.id })
+      .from(schema.subscriptions)
+      .where(and(eq(schema.subscriptions.packageId, params.id), eq(schema.subscriptions.status, 'active')))
+      .limit(1);
+
+    if (activeSub) {
+      set.status = 400;
+      return { message: 'Paket sedang digunakan oleh langganan aktif. Nonaktifkan paket alih-alih menghapusnya.' };
+    }
+
     await db.delete(schema.packages).where(eq(schema.packages.id, params.id));
     return { success: true };
   })
@@ -407,8 +622,19 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
       }),
     },
   )
-  .delete('/agency-packages/:id', async ({ params, getAdminUser }) => {
+  .delete('/agency-packages/:id', async ({ params, getAdminUser, set }) => {
     await getAdminUser();
+    const [activeSub] = await db
+      .select({ id: schema.agencySubscriptions.id })
+      .from(schema.agencySubscriptions)
+      .where(and(eq(schema.agencySubscriptions.packageId, params.id), eq(schema.agencySubscriptions.status, 'active')))
+      .limit(1);
+
+    if (activeSub) {
+      set.status = 400;
+      return { message: 'Paket agency sedang digunakan oleh agency aktif. Nonaktifkan paket alih-alih menghapusnya.' };
+    }
+
     await db.delete(schema.agencyPackages).where(eq(schema.agencyPackages.id, params.id));
     return { success: true };
   })
@@ -525,4 +751,79 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
       .from(schema.devices)
       .leftJoin(schema.users, eq(schema.users.id, schema.devices.userId))
       .orderBy(desc(schema.devices.createdAt));
+  })
+
+  // 8. Test SMTP Connection
+  .post(
+    '/settings/test-smtp',
+    async ({ body, getAdminUser, set }) => {
+      await getAdminUser();
+      const { to } = body;
+      const ok = await sendEmail(
+        to,
+        'Uji Koneksi SMTP - Neowa WhatsApp Gateway',
+        '<div style="font-family:sans-serif;padding:24px;border:1px solid #e2e8f0;border-radius:12px;max-width:500px;margin:auto;"><h3 style="color:#10b981;">Uji Koneksi SMTP Berhasil!</h3><p style="color:#475569;">Konfigurasi server SMTP pada Neowa WhatsApp Gateway berfungsi normal dan siap digunakan.</p></div>',
+      );
+      if (!ok) {
+        set.status = 400;
+        return { success: false, message: 'Gagal mengirim email uji. Periksa konfigurasi host, port, user, atau password SMTP Anda.' };
+      }
+      return { success: true, message: `Email uji berhasil dikirim ke ${to}` };
+    },
+    {
+      body: t.Object({
+        to: t.String({ format: 'email' }),
+      }),
+    },
+  )
+
+  // 9. Platform Analytics
+  .get('/analytics', async ({ getAdminUser }) => {
+    await getAdminUser();
+
+    const [revResult] = await db
+      .select({ total: sql<number>`coalesce(sum(${schema.payments.amount}), 0)::int` })
+      .from(schema.payments)
+      .where(eq(schema.payments.status, 'paid'));
+
+    const [userCountResult] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.users);
+
+    const [deviceCountResult] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.devices)
+      .where(eq(schema.devices.status, 'connected'));
+
+    const [msgCountResult] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.messageLogs);
+
+    const [msgSentResult] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.messageLogs)
+      .where(sql`${schema.messageLogs.status} in ('sent', 'delivered')`);
+
+    const recentPayments = await db
+      .select({
+        id: schema.payments.id,
+        amount: schema.payments.amount,
+        status: schema.payments.status,
+        createdAt: schema.payments.createdAt,
+        userEmail: schema.users.email,
+        userName: schema.users.name,
+      })
+      .from(schema.payments)
+      .leftJoin(schema.users, eq(schema.users.id, schema.payments.userId))
+      .orderBy(desc(schema.payments.createdAt))
+      .limit(5);
+
+    return {
+      totalRevenue: revResult?.total || 0,
+      totalUsers: userCountResult?.count || 0,
+      activeDevices: deviceCountResult?.count || 0,
+      totalMessages: msgCountResult?.count || 0,
+      sentMessages: msgSentResult?.count || 0,
+      recentPayments,
+    };
   });

@@ -77,6 +77,32 @@ export const useBroadcastStore = defineStore('broadcast', () => {
     return data
   }
 
+  async function cancelBroadcast(id) {
+    const { data } = await api.post(`/broadcasts/${id}/cancel`)
+    return data
+  }
+
+  async function pauseBroadcast(id) {
+    const { data } = await api.post(`/broadcasts/${id}/pause`)
+    return data
+  }
+
+  async function resumeBroadcast(id) {
+    const { data } = await api.post(`/broadcasts/${id}/resume`)
+    return data
+  }
+
+  async function exportCsv(listId) {
+    const response = await api.get(`/contact-lists/${listId}/export-csv`, { responseType: 'blob' })
+    const url = window.URL.createObjectURL(new Blob([response.data]))
+    const link = document.createElement('a')
+    link.href = url
+    link.setAttribute('download', `contacts-${listId}.csv`)
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  }
+
   return {
     contactLists,
     broadcasts,
@@ -88,8 +114,12 @@ export const useBroadcastStore = defineStore('broadcast', () => {
     addContact,
     deleteContact,
     importCsv,
+    exportCsv,
     fetchBroadcasts,
     createBroadcast,
     getBroadcast,
+    cancelBroadcast,
+    pauseBroadcast,
+    resumeBroadcast,
   }
 })

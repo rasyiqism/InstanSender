@@ -2,7 +2,7 @@ import { Queue, Worker, type Job } from 'bullmq';
 import Redis from 'ioredis';
 import { config } from '../config';
 import { db, schema } from '../db';
-import { eq, sql } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { waClient } from './wa-client';
 import { dispatchWebhook } from './webhooks';
 
@@ -43,6 +43,30 @@ export const messageQueue = new Queue<SendMessageJobData>('send-message-queue', 
 
 export async function processSendMessageJob(data: SendMessageJobData) {
   const { logId, deviceId, userId, to, type, message, mediaUrl, caption, broadcastId } = data;
+
+  // Check if broadcast is cancelled or paused
+  if (broadcastId) {
+    const [b] = await db
+      .select({ status: schema.broadcasts.status })
+      .from(schema.broadcasts)
+      .where(eq(schema.broadcasts.id, broadcastId))
+      .limit(1);
+
+    if (b && (b.status === 'cancelled' || b.status === 'paused')) {
+      await db
+        .update(schema.messageLogs)
+        .set({ status: 'failed', errorMessage: `Broadcast is ${b.status}` })
+        .where(eq(schema.messageLogs.id, logId));
+      return;
+    }
+
+    if (b && b.status === 'pending') {
+      await db
+        .update(schema.broadcasts)
+        .set({ status: 'running', startedAt: new Date() })
+        .where(and(eq(schema.broadcasts.id, broadcastId), eq(schema.broadcasts.status, 'pending')));
+    }
+  }
 
   try {
     await waClient.sendMessage({

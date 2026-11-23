@@ -34,21 +34,72 @@ const progressPercent = computed(() => {
 })
 
 const isDone = computed(
-  () => broadcast.value?.status === 'completed' || broadcast.value?.status === 'failed',
+  () =>
+    broadcast.value?.status === 'completed' ||
+    broadcast.value?.status === 'failed' ||
+    broadcast.value?.status === 'cancelled',
 )
+
+const actionLoading = ref(false)
 
 function statusVariant(status) {
   switch (status) {
     case 'completed': return 'success'
     case 'running': return 'warning'
+    case 'paused': return 'warning'
     case 'failed': return 'destructive'
+    case 'cancelled': return 'secondary'
     default: return 'secondary'
   }
 }
 
 function statusLabel(status) {
-  const map = { pending: 'Pending', running: 'Berjalan', completed: 'Selesai', failed: 'Gagal' }
+  const map = {
+    pending: 'Pending',
+    running: 'Berjalan',
+    paused: 'Dijeda',
+    completed: 'Selesai',
+    failed: 'Gagal',
+    cancelled: 'Dibatalkan',
+  }
   return map[status] || status
+}
+
+async function handleCancel() {
+  if (!confirm('Apakah Anda yakin ingin membatalkan broadcast ini? Sisa kuota pesan yang belum terkirim akan dikembalikan.')) return
+  actionLoading.value = true
+  try {
+    await store.cancelBroadcast(id)
+    await load()
+  } catch (err) {
+    error.value = err.response?.data?.message ?? 'Gagal membatalkan broadcast'
+  } finally {
+    actionLoading.value = false
+  }
+}
+
+async function handlePause() {
+  actionLoading.value = true
+  try {
+    await store.pauseBroadcast(id)
+    await load()
+  } catch (err) {
+    error.value = err.response?.data?.message ?? 'Gagal menjeda broadcast'
+  } finally {
+    actionLoading.value = false
+  }
+}
+
+async function handleResume() {
+  actionLoading.value = true
+  try {
+    await store.resumeBroadcast(id)
+    await load()
+  } catch (err) {
+    error.value = err.response?.data?.message ?? 'Gagal melanjutkan broadcast'
+  } finally {
+    actionLoading.value = false
+  }
 }
 
 const isScheduled = computed(
@@ -107,6 +158,36 @@ onUnmounted(stopPolling)
           {{ new Date(broadcast.createdAt).toLocaleString('id-ID', { dateStyle: 'full', timeStyle: 'short' }) }}
         </p>
       </div>
+      <div v-if="broadcast && !isDone" class="flex items-center gap-2">
+        <Button
+          v-if="broadcast.status === 'running'"
+          variant="outline"
+          size="sm"
+          :disabled="actionLoading"
+          @click="handlePause"
+        >
+          Jeda
+        </Button>
+        <Button
+          v-if="broadcast.status === 'paused'"
+          variant="primary"
+          size="sm"
+          :disabled="actionLoading"
+          @click="handleResume"
+        >
+          Lanjutkan
+        </Button>
+        <Button
+          v-if="broadcast.status === 'running' || broadcast.status === 'pending' || broadcast.status === 'paused'"
+          variant="destructive"
+          size="sm"
+          :disabled="actionLoading"
+          @click="handleCancel"
+        >
+          Batalkan
+        </Button>
+      </div>
+
       <Button variant="outline" size="icon" @click="load">
         <RefreshCw class="h-4 w-4" :class="broadcast?.status === 'running' ? 'animate-spin' : ''" />
       </Button>

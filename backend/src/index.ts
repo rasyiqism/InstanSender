@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import { app } from './app';
 import { config } from './config';
 import { runSeed } from './seed';
+import { initSubscriptionReminderCron } from './common/subscription-reminder';
 
 // Ensure uploads folder exists
 await fs.mkdir(config.uploadDir, { recursive: true });
@@ -12,6 +13,9 @@ try {
 } catch (err: any) {
   console.warn(`[Bootstrap] Seed warning:`, err.message);
 }
+
+// Start background cron jobs
+initSubscriptionReminderCron();
 
 app.listen(config.port, () => {
   console.log(`🚀 Neowa API (Bun + Elysia) running on http://localhost:${config.port}`);

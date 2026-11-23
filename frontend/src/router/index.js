@@ -44,6 +44,11 @@ const routes = [
         component: () => import("../views/dashboard/Devices.vue"),
       },
       {
+        path: "groups",
+        name: "groups",
+        component: () => import("../views/dashboard/Groups.vue"),
+      },
+      {
         path: "api-keys",
         name: "apiKeys",
         component: () => import("../views/dashboard/ApiKeys.vue"),

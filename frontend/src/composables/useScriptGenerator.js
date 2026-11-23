@@ -17,7 +17,7 @@ export function useScriptGenerator() {
   // suffix and re-add it explicitly so the generated endpoint is always
   // fully qualified regardless of how apiBaseUrl is configured.
   const apiOrigin = computed(() => apiBaseUrl.replace(/\/api\/?$/, '') || '')
-  const messagesEndpoint = computed(() => `${apiOrigin.value}/api/messages/send`)
+  const messagesEndpoint = computed(() => `${apiOrigin.value}/api/v1/messages/send`)
 
   // Default token: prefer the logged-in user's token (prefilled convenience).
   const token = ref(auth.token ?? '')

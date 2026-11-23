@@ -4,12 +4,15 @@ import api from '../../services/api'
 import Button from '../../components/ui/Button.vue'
 import Card from '../../components/ui/Card.vue'
 import Alert from '../../components/ui/Alert.vue'
-import { Loader2, Save, Settings, CheckCircle2 } from 'lucide-vue-next'
+import { Loader2, Save, Settings, CheckCircle2, Send, AlertTriangle } from 'lucide-vue-next'
 
 const error = ref('')
 const busy = ref(false)
 const saved = ref(false)
 const settings = ref([])
+const testingSmtp = ref(false)
+const testEmailRecipient = ref('')
+const smtpTestResult = ref(null)
 
 // group settings by category for the UI
 const groups = [
@@ -70,6 +73,20 @@ async function save() {
   }
 }
 
+async function testSmtp() {
+  if (!testEmailRecipient.value) return
+  testingSmtp.value = true
+  smtpTestResult.value = null
+  try {
+    const { data } = await api.post('/admin/settings/test-smtp', { to: testEmailRecipient.value })
+    smtpTestResult.value = { success: true, message: data.message }
+  } catch (err) {
+    smtpTestResult.value = { success: false, message: err.response?.data?.message || 'Uji SMTP gagal' }
+  } finally {
+    testingSmtp.value = false
+  }
+}
+
 function settingsInGroup(keys) {
   return keys.map((k) => settings.value.find((s) => s.key === k)).filter(Boolean)
 }
@@ -120,6 +137,35 @@ function settingsInGroup(keys) {
               class="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
             />
           </label>
+        </div>
+
+        <div v-if="group.title === 'SMTP Email'" class="mt-6 border-t border-slate-100 pt-4">
+          <p class="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Uji Coba Pengiriman Email</p>
+          <div class="flex flex-wrap items-center gap-2">
+            <input
+              v-model="testEmailRecipient"
+              type="email"
+              placeholder="Email penerima uji (contoh: user@gmail.com)"
+              class="h-9 min-w-[260px] flex-1 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm focus:border-primary focus:outline-none"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              :disabled="testingSmtp || !testEmailRecipient"
+              @click="testSmtp"
+            >
+              <Loader2 v-if="testingSmtp" class="h-3.5 w-3.5 animate-spin" />
+              <Send v-else class="h-3.5 w-3.5" />
+              Kirim Email Uji
+            </Button>
+          </div>
+          <p
+            v-if="smtpTestResult"
+            class="mt-2 text-xs font-medium"
+            :class="smtpTestResult.success ? 'text-emerald-600' : 'text-rose-600'"
+          >
+            {{ smtpTestResult.message }}
+          </p>
         </div>
       </Card>
     </template>

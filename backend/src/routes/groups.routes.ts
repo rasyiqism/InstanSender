@@ -5,14 +5,24 @@ import { authContext } from '../common/middleware';
 import { waClient } from '../common/wa-client';
 import { dispatchWebhook } from '../common/webhooks';
 
+async function getUserIdFromContext(validateApiKeyAuth: any, getAuthUser: any): Promise<{ userId: string; scopedDeviceId?: string | null }> {
+  try {
+    const authResult = await validateApiKeyAuth();
+    return { userId: authResult.user.id, scopedDeviceId: authResult.keyRecord.deviceId };
+  } catch {
+    const user = await getAuthUser();
+    return { userId: user.id, scopedDeviceId: null };
+  }
+}
+
 export const groupsRoutes = new Elysia({ prefix: '/v1/groups' })
   .use(authContext)
   // List groups
   .post(
     '/',
-    async ({ body, validateApiKeyAuth, set }) => {
-      const { keyRecord, user } = await validateApiKeyAuth();
-      const deviceId = keyRecord.deviceId || (body as any)?.deviceId;
+    async ({ body, validateApiKeyAuth, getAuthUser, set }) => {
+      const { userId, scopedDeviceId } = await getUserIdFromContext(validateApiKeyAuth, getAuthUser);
+      const deviceId = scopedDeviceId || (body as any)?.deviceId;
 
       if (!deviceId) {
         set.status = 400;
@@ -22,7 +32,7 @@ export const groupsRoutes = new Elysia({ prefix: '/v1/groups' })
       const [device] = await db
         .select()
         .from(schema.devices)
-        .where(and(eq(schema.devices.id, deviceId), eq(schema.devices.userId, user.id)))
+        .where(and(eq(schema.devices.id, deviceId), eq(schema.devices.userId, userId)))
         .limit(1);
 
       if (!device) {
@@ -40,9 +50,9 @@ export const groupsRoutes = new Elysia({ prefix: '/v1/groups' })
       ),
     },
   )
-  .get('/', async ({ query, validateApiKeyAuth, set }) => {
-    const { keyRecord, user } = await validateApiKeyAuth();
-    const deviceId = keyRecord.deviceId || (query as any)?.deviceId;
+  .get('/', async ({ query, validateApiKeyAuth, getAuthUser, set }) => {
+    const { userId, scopedDeviceId } = await getUserIdFromContext(validateApiKeyAuth, getAuthUser);
+    const deviceId = scopedDeviceId || (query as any)?.deviceId;
 
     if (!deviceId) {
       set.status = 400;
@@ -52,7 +62,7 @@ export const groupsRoutes = new Elysia({ prefix: '/v1/groups' })
     const [device] = await db
       .select()
       .from(schema.devices)
-      .where(and(eq(schema.devices.id, deviceId), eq(schema.devices.userId, user.id)))
+      .where(and(eq(schema.devices.id, deviceId), eq(schema.devices.userId, userId)))
       .limit(1);
 
     if (!device) {
@@ -65,10 +75,10 @@ export const groupsRoutes = new Elysia({ prefix: '/v1/groups' })
   // Scrape group members
   .post(
     '/members',
-    async ({ body, validateApiKeyAuth, set }) => {
-      const { keyRecord, user } = await validateApiKeyAuth();
+    async ({ body, validateApiKeyAuth, getAuthUser, set }) => {
+      const { userId, scopedDeviceId } = await getUserIdFromContext(validateApiKeyAuth, getAuthUser);
       const { groupJid, deviceId } = body;
-      const targetDeviceId = keyRecord.deviceId || deviceId;
+      const targetDeviceId = scopedDeviceId || deviceId;
 
       if (!targetDeviceId) {
         set.status = 400;
@@ -78,7 +88,7 @@ export const groupsRoutes = new Elysia({ prefix: '/v1/groups' })
       const [device] = await db
         .select()
         .from(schema.devices)
-        .where(and(eq(schema.devices.id, targetDeviceId), eq(schema.devices.userId, user.id)))
+        .where(and(eq(schema.devices.id, targetDeviceId), eq(schema.devices.userId, userId)))
         .limit(1);
 
       if (!device) {
@@ -89,7 +99,7 @@ export const groupsRoutes = new Elysia({ prefix: '/v1/groups' })
       const members = await waClient.getGroupMembers(targetDeviceId, groupJid);
 
       // Best effort webhook
-      await dispatchWebhook(user.id, 'group.members', {
+      await dispatchWebhook(userId, 'group.members', {
         deviceId: targetDeviceId,
         groupJid,
         members,

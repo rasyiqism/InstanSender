@@ -1,6 +1,6 @@
 import { Elysia, t } from 'elysia';
 import { db, schema } from '../db';
-import { eq, and, desc, inArray, sql } from 'drizzle-orm';
+import { eq, and, desc, inArray, ilike, sql } from 'drizzle-orm';
 import { authContext } from '../common/middleware';
 
 export const logsRoutes = new Elysia({ prefix: '/logs' })
@@ -18,7 +18,13 @@ export const logsRoutes = new Elysia({ prefix: '/logs' })
       .where(eq(schema.devices.userId, user.id));
 
     if (userDevices.length === 0) {
-      return { data: [], total: 0, page, limit };
+      return {
+        data: [],
+        total: 0,
+        page,
+        limit,
+        pagination: { page, limit, total: 0, totalPages: 0 },
+      };
     }
 
     const deviceIds = userDevices.map((d) => d.id);
@@ -46,11 +52,18 @@ export const logsRoutes = new Elysia({ prefix: '/logs' })
       .limit(limit)
       .offset(offset);
 
+    const total = countResult?.count || 0;
     return {
       data: logs,
-      total: countResult?.count || 0,
+      total,
       page,
       limit,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
     };
   })
   // 2. Delete single message log
@@ -117,6 +130,16 @@ export const logsRoutes = new Elysia({ prefix: '/logs' })
     if (query.webhookId) {
       conditions.push(eq(schema.webhookLogs.webhookId, query.webhookId as string));
     }
+    if (query.eventType) {
+      conditions.push(eq(schema.webhookLogs.eventType, query.eventType as any));
+    }
+    if (query.success !== undefined && query.success !== '') {
+      const isSuccess = String(query.success).toLowerCase() === 'true';
+      conditions.push(eq(schema.webhookLogs.success, isSuccess));
+    }
+    if (query.search && typeof query.search === 'string' && query.search.trim()) {
+      conditions.push(ilike(schema.webhookLogs.url, `%${query.search.trim()}%`));
+    }
 
     const whereClause = and(...conditions);
 
@@ -133,11 +156,18 @@ export const logsRoutes = new Elysia({ prefix: '/logs' })
       .limit(limit)
       .offset(offset);
 
+    const total = countResult?.count || 0;
     return {
       data: logs,
-      total: countResult?.count || 0,
+      total,
       page,
       limit,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
     };
   })
   // 5. Delete single webhook log

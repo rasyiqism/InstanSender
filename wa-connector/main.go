@@ -12,7 +12,9 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -480,7 +482,11 @@ type server struct {
 
 func (s *server) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer "+s.token {
+		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if token == "" {
+			token = r.Header.Get("X-Internal-Token")
+		}
+		if s.token != "" && token != s.token {
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 			return
 		}
@@ -582,6 +588,9 @@ func (s *server) handleGroupMembers(w http.ResponseWriter, r *http.Request) {
 	}
 	deviceID := r.URL.Query().Get("deviceId")
 	jidStr := r.URL.Query().Get("jid")
+	if jidStr == "" {
+		jidStr = r.URL.Query().Get("groupId")
+	}
 	if deviceID == "" || jidStr == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "deviceId and jid are required"})
 		return
@@ -732,6 +741,56 @@ func fetchImage(ctx context.Context, mediaURL string) ([]byte, string, uint32, u
 	return data, mimetype, uint32(cfg.Width), uint32(cfg.Height), nil
 }
 
+func fetchDocument(ctx context.Context, mediaURL string) ([]byte, string, string, error) {
+	if mediaURL == "" {
+		return nil, "", "", fmt.Errorf("mediaUrl is required")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, mediaURL, nil)
+	if err != nil {
+		return nil, "", "", err
+	}
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, "", "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, "", "", fmt.Errorf("mediaUrl returned HTTP %d", resp.StatusCode)
+	}
+	if resp.ContentLength > maxMediaBytes {
+		return nil, "", "", fmt.Errorf("document exceeds %d bytes", maxMediaBytes)
+	}
+
+	limited := io.LimitReader(resp.Body, maxMediaBytes+1)
+	data, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, "", "", err
+	}
+	if len(data) > maxMediaBytes {
+		return nil, "", "", fmt.Errorf("document exceeds %d bytes", maxMediaBytes)
+	}
+
+	mimetype := resp.Header.Get("Content-Type")
+	if idx := strings.Index(mimetype, ";"); idx >= 0 {
+		mimetype = strings.TrimSpace(mimetype[:idx])
+	}
+	if mimetype == "" {
+		mimetype = http.DetectContentType(data)
+	}
+
+	filename := "document"
+	if parsedURL, err := url.Parse(mediaURL); err == nil {
+		if base := path.Base(parsedURL.Path); base != "" && base != "." && base != "/" {
+			filename = base
+		}
+	}
+
+	return data, mimetype, filename, nil
+}
+
 func (s *server) handleSend(w http.ResponseWriter, r *http.Request) {
 	var req sendRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -752,7 +811,18 @@ func (s *server) handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jid := types.NewJID(req.To, types.DefaultUserServer)
+	var jid types.JID
+	if strings.HasSuffix(req.To, "@g.us") {
+		parsed, err := types.ParseJID(req.To)
+		if err == nil {
+			jid = parsed
+		} else {
+			jid = types.NewJID(req.To, types.DefaultUserServer)
+		}
+	} else {
+		clean := strings.TrimPrefix(req.To, "+")
+		jid = types.NewJID(clean, types.DefaultUserServer)
+	}
 	var msg *waProto.Message
 
 	switch req.Type {
@@ -787,8 +857,31 @@ func (s *server) handleSend(w http.ResponseWriter, r *http.Request) {
 		}
 		msg = &waProto.Message{ImageMessage: imageMsg}
 	case "document":
-		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "document messages are not implemented yet"})
-		return
+		data, mimetype, filename, err := fetchDocument(r.Context(), req.MediaURL)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		if req.Caption != "" {
+			filename = req.Caption
+		}
+		upload, err := sess.Client.Upload(r.Context(), data, whatsmeow.MediaDocument)
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+			return
+		}
+		docMsg := &waProto.DocumentMessage{
+			Title:         proto.String(filename),
+			FileName:      proto.String(filename),
+			Mimetype:      proto.String(mimetype),
+			URL:           proto.String(upload.URL),
+			DirectPath:    proto.String(upload.DirectPath),
+			MediaKey:      upload.MediaKey,
+			FileEncSHA256: upload.FileEncSHA256,
+			FileSHA256:    upload.FileSHA256,
+			FileLength:    proto.Uint64(upload.FileLength),
+		}
+		msg = &waProto.Message{DocumentMessage: docMsg}
 	default:
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown type"})
 		return

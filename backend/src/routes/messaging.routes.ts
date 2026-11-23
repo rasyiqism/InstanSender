@@ -3,6 +3,7 @@ import { db, schema } from '../db';
 import { eq, and, sql } from 'drizzle-orm';
 import { authContext } from '../common/middleware';
 import { messageQueue } from '../common/queue';
+import { checkRateLimit } from '../common/rate-limit';
 
 export const messagingRoutes = new Elysia({ prefix: '/v1/messages' })
   .use(authContext)
@@ -13,9 +14,15 @@ export const messagingRoutes = new Elysia({ prefix: '/v1/messages' })
       const { keyRecord, user } = await validateApiKeyAuth();
       const { to, message, deviceId } = body;
 
+      // Validate device scope if API Key is restricted
+      if (keyRecord.deviceId && deviceId && keyRecord.deviceId !== deviceId) {
+        set.status = 403;
+        return { error: `API Key ini terikat pada device ID ${keyRecord.deviceId}, tidak diizinkan mengirim melalui device ID ${deviceId}` };
+      }
+
       // Determine target device
-      const targetDeviceId = keyRecord.deviceId || deviceId;
-      if (!targetDeviceId) {
+      let activeDeviceId = keyRecord.deviceId || deviceId;
+      if (!activeDeviceId) {
         // Fallback: pick user's first connected device
         const [firstDevice] = await db
           .select()
@@ -27,9 +34,8 @@ export const messagingRoutes = new Elysia({ prefix: '/v1/messages' })
           set.status = 400;
           return { error: 'Tidak ada device WhatsApp yang terhubung untuk mengirim pesan' };
         }
+        activeDeviceId = firstDevice.id;
       }
-
-      const activeDeviceId = targetDeviceId;
 
       // Verify device belongs to user
       const [device] = await db
@@ -43,23 +49,41 @@ export const messagingRoutes = new Elysia({ prefix: '/v1/messages' })
         return { error: 'Device tidak ditemukan atau tidak valid' };
       }
 
-      // Check subscription quota if applicable
+      // Check subscription quota & rate limit
       const [sub] = await db
         .select()
         .from(schema.subscriptions)
         .where(and(eq(schema.subscriptions.userId, user.id), eq(schema.subscriptions.status, 'active')))
         .limit(1);
 
+      let limitPerSec = 5;
       if (sub) {
         const [pkg] = await db.select().from(schema.packages).where(eq(schema.packages.id, sub.packageId)).limit(1);
+        if (pkg?.rateLimitPerSecond) {
+          limitPerSec = pkg.rateLimitPerSecond;
+        }
+
         if (pkg?.messageQuota !== null && pkg?.messageQuota !== undefined) {
           if (sub.messagesUsed >= pkg.messageQuota) {
             set.status = 403;
             return { error: 'Kuota pesan bulanan Anda telah habis' };
           }
         }
+      }
 
-        // Increment messages used
+      // Check per-device rate limit BEFORE deducting quota
+      const rateCheck = await checkRateLimit(`device:${device.id}`, limitPerSec);
+      if (!rateCheck.allowed) {
+        set.status = 429;
+        set.headers['Retry-After'] = String(rateCheck.retryAfterSec);
+        return {
+          error: `Batas pengiriman pesan (${limitPerSec} req/detik) terlampaui. Silakan tunggu sesaat.`,
+          retryAfter: rateCheck.retryAfterSec,
+        };
+      }
+
+      // Increment messages used after rate limit passes
+      if (sub) {
         await db
           .update(schema.subscriptions)
           .set({ messagesUsed: sql`${schema.subscriptions.messagesUsed} + 1` })
@@ -114,10 +138,25 @@ export const messagingRoutes = new Elysia({ prefix: '/v1/messages' })
       const { keyRecord, user } = await validateApiKeyAuth();
       const { to, type, mediaUrl, caption, deviceId } = body;
 
-      const targetDeviceId = keyRecord.deviceId || deviceId;
+      // Validate device scope if API Key is restricted
+      if (keyRecord.deviceId && deviceId && keyRecord.deviceId !== deviceId) {
+        set.status = 403;
+        return { error: `API Key ini terikat pada device ID ${keyRecord.deviceId}, tidak diizinkan mengirim melalui device ID ${deviceId}` };
+      }
+
+      let targetDeviceId = keyRecord.deviceId || deviceId;
       if (!targetDeviceId) {
-        set.status = 400;
-        return { error: 'deviceId wajib disertakan' };
+        const [firstDevice] = await db
+          .select()
+          .from(schema.devices)
+          .where(and(eq(schema.devices.userId, user.id), eq(schema.devices.status, 'connected')))
+          .limit(1);
+
+        if (!firstDevice) {
+          set.status = 400;
+          return { error: 'Tidak ada device WhatsApp yang terhubung untuk mengirim media' };
+        }
+        targetDeviceId = firstDevice.id;
       }
 
       const [device] = await db
@@ -129,6 +168,47 @@ export const messagingRoutes = new Elysia({ prefix: '/v1/messages' })
       if (!device) {
         set.status = 404;
         return { error: 'Device tidak ditemukan' };
+      }
+
+      // Check subscription quota & rate limit
+      const [sub] = await db
+        .select()
+        .from(schema.subscriptions)
+        .where(and(eq(schema.subscriptions.userId, user.id), eq(schema.subscriptions.status, 'active')))
+        .limit(1);
+
+      let limitPerSec = 5;
+      if (sub) {
+        const [pkg] = await db.select().from(schema.packages).where(eq(schema.packages.id, sub.packageId)).limit(1);
+        if (pkg?.rateLimitPerSecond) {
+          limitPerSec = pkg.rateLimitPerSecond;
+        }
+
+        if (pkg?.messageQuota !== null && pkg?.messageQuota !== undefined) {
+          if (sub.messagesUsed >= pkg.messageQuota) {
+            set.status = 403;
+            return { error: 'Kuota pesan bulanan Anda telah habis' };
+          }
+        }
+      }
+
+      // Check per-device rate limit BEFORE deducting quota
+      const rateCheck = await checkRateLimit(`device:${device.id}`, limitPerSec);
+      if (!rateCheck.allowed) {
+        set.status = 429;
+        set.headers['Retry-After'] = String(rateCheck.retryAfterSec);
+        return {
+          error: `Batas pengiriman pesan (${limitPerSec} req/detik) terlampaui. Silakan tunggu sesaat.`,
+          retryAfter: rateCheck.retryAfterSec,
+        };
+      }
+
+      // Increment messages used after rate limit passes
+      if (sub) {
+        await db
+          .update(schema.subscriptions)
+          .set({ messagesUsed: sql`${schema.subscriptions.messagesUsed} + 1` })
+          .where(eq(schema.subscriptions.id, sub.id));
       }
 
       const cleanTo = to.replace(/[^\d]/g, '');

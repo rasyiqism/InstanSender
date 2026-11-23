@@ -34,7 +34,14 @@ export const webhookLogEventTypeEnum = pgEnum('webhook_logs_event_type_enum', [
   'group.members',
 ]);
 export const broadcastTypeEnum = pgEnum('broadcasts_type_enum', ['text', 'image', 'document']);
-export const broadcastStatusEnum = pgEnum('broadcasts_status_enum', ['pending', 'running', 'completed', 'failed']);
+export const broadcastStatusEnum = pgEnum('broadcasts_status_enum', [
+  'pending',
+  'running',
+  'completed',
+  'failed',
+  'paused',
+  'cancelled',
+]);
 export const agencyStatusEnum = pgEnum('agencies_status_enum', ['trial', 'active', 'expired', 'suspended', 'cancelled']);
 export const agencyPackageStatusEnum = pgEnum('agency_packages_status_enum', ['active', 'inactive']);
 
@@ -71,8 +78,8 @@ export const packages = pgTable('packages', {
 // 3. Subscriptions
 export const subscriptions = pgTable('subscriptions', {
   id: uuid('id').primaryKey().defaultRandom(),
-  userId: uuid('user_id').notNull(),
-  packageId: uuid('package_id').notNull(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  packageId: uuid('package_id').notNull().references(() => packages.id, { onDelete: 'restrict' }),
   status: subscriptionStatusEnum('status').default('pending').notNull(),
   startDate: timestamp('start_date', { withTimezone: true }),
   endDate: timestamp('end_date', { withTimezone: true }),
@@ -87,8 +94,9 @@ export const subscriptions = pgTable('subscriptions', {
 // 4. Payments
 export const payments = pgTable('payments', {
   id: uuid('id').primaryKey().defaultRandom(),
-  userId: uuid('user_id').notNull(),
-  subscriptionId: uuid('subscription_id'),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  subscriptionId: uuid('subscription_id').references(() => subscriptions.id, { onDelete: 'set null' }),
+  agencySubscriptionId: uuid('agency_subscription_id').references(() => agencySubscriptions.id, { onDelete: 'set null' }),
   amount: bigint('amount', { mode: 'number' }).notNull(),
   kodeUnik: integer('kode_unik').notNull(),
   bankAccountTujuan: varchar('bank_account_tujuan', { length: 255 }).notNull(),
@@ -106,7 +114,7 @@ export const payments = pgTable('payments', {
 // 5. Devices
 export const devices = pgTable('devices', {
   id: uuid('id').primaryKey().defaultRandom(),
-  userId: uuid('user_id').notNull(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   agencyId: uuid('agency_id'),
   name: varchar('name', { length: 255 }).notNull(),
   phoneNumber: varchar('phone_number', { length: 50 }),
@@ -125,8 +133,8 @@ export const devices = pgTable('devices', {
 // 6. API Keys
 export const apiKeys = pgTable('api_keys', {
   id: uuid('id').primaryKey().defaultRandom(),
-  userId: uuid('user_id').notNull(),
-  deviceId: uuid('device_id'),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  deviceId: uuid('device_id').references(() => devices.id, { onDelete: 'cascade' }),
   keyHash: varchar('key_hash', { length: 255 }).notNull().unique(),
   keyPrefix: varchar('key_prefix', { length: 20 }).notNull(),
   plaintextKey: varchar('plaintext_key', { length: 255 }),
@@ -141,9 +149,9 @@ export const apiKeys = pgTable('api_keys', {
 // 7. Message Logs
 export const messageLogs = pgTable('message_logs', {
   id: uuid('id').primaryKey().defaultRandom(),
-  deviceId: uuid('device_id').notNull(),
-  apiKeyId: uuid('api_key_id'),
-  broadcastId: uuid('broadcast_id'),
+  deviceId: uuid('device_id').notNull().references(() => devices.id, { onDelete: 'cascade' }),
+  apiKeyId: uuid('api_key_id').references(() => apiKeys.id, { onDelete: 'set null' }),
+  broadcastId: uuid('broadcast_id').references(() => broadcasts.id, { onDelete: 'set null' }),
   recipient: varchar('recipient', { length: 50 }).notNull(),
   messageType: messageTypeEnum('message_type').notNull(),
   status: messageStatusEnum('status').default('queued').notNull(),
@@ -161,7 +169,7 @@ export const messageLogs = pgTable('message_logs', {
 // 8. Auto Reply Rules
 export const autoReplyRules = pgTable('auto_reply_rules', {
   id: uuid('id').primaryKey().defaultRandom(),
-  deviceId: uuid('device_id').notNull(),
+  deviceId: uuid('device_id').notNull().references(() => devices.id, { onDelete: 'cascade' }),
   keyword: varchar('keyword', { length: 255 }).notNull(),
   matchMode: autoReplyMatchModeEnum('match_mode').default('contains').notNull(),
   reply: varchar('reply', { length: 4096 }).notNull(),
@@ -174,7 +182,7 @@ export const autoReplyRules = pgTable('auto_reply_rules', {
 // 9. Contact Lists
 export const contactLists = pgTable('contact_lists', {
   id: uuid('id').primaryKey().defaultRandom(),
-  userId: uuid('user_id').notNull(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   name: varchar('name', { length: 255 }).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [
@@ -184,7 +192,7 @@ export const contactLists = pgTable('contact_lists', {
 // 10. Contacts
 export const contacts = pgTable('contacts', {
   id: uuid('id').primaryKey().defaultRandom(),
-  contactListId: uuid('contact_list_id').notNull(),
+  contactListId: uuid('contact_list_id').notNull().references(() => contactLists.id, { onDelete: 'cascade' }),
   phoneNumber: varchar('phone_number', { length: 50 }).notNull(),
   name: varchar('name', { length: 255 }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -195,9 +203,9 @@ export const contacts = pgTable('contacts', {
 // 11. Broadcasts
 export const broadcasts = pgTable('broadcasts', {
   id: uuid('id').primaryKey().defaultRandom(),
-  userId: uuid('user_id').notNull(),
-  deviceId: uuid('device_id').notNull(),
-  contactListId: uuid('contact_list_id').notNull(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  deviceId: uuid('device_id').notNull().references(() => devices.id, { onDelete: 'cascade' }),
+  contactListId: uuid('contact_list_id').notNull().references(() => contactLists.id, { onDelete: 'cascade' }),
   message: varchar('message', { length: 4096 }),
   type: broadcastTypeEnum('type').default('text').notNull(),
   mediaUrl: varchar('media_url', { length: 2048 }),
@@ -207,6 +215,7 @@ export const broadcasts = pgTable('broadcasts', {
   sentCount: integer('sent_count').default(0).notNull(),
   failedCount: integer('failed_count').default(0).notNull(),
   delaySeconds: integer('delay_seconds').default(5).notNull(),
+  scheduledAt: timestamp('scheduled_at', { withTimezone: true }),
   startedAt: timestamp('started_at', { withTimezone: true }),
   completedAt: timestamp('completed_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -219,7 +228,7 @@ export const broadcasts = pgTable('broadcasts', {
 // 12. Webhooks
 export const webhooks = pgTable('webhooks', {
   id: uuid('id').primaryKey().defaultRandom(),
-  userId: uuid('user_id').notNull(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   url: varchar('url', { length: 2048 }).notNull(),
   eventType: webhookEventTypeEnum('event_type').default('message.status').notNull(),
   secret: varchar('secret', { length: 255 }).notNull(),
@@ -232,8 +241,8 @@ export const webhooks = pgTable('webhooks', {
 // 13. Webhook Logs
 export const webhookLogs = pgTable('webhook_logs', {
   id: uuid('id').primaryKey().defaultRandom(),
-  userId: uuid('user_id').notNull(),
-  webhookId: uuid('webhook_id'),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  webhookId: uuid('webhook_id').references(() => webhooks.id, { onDelete: 'cascade' }),
   url: varchar('url', { length: 2048 }).notNull(),
   eventType: webhookLogEventTypeEnum('event_type').notNull(),
   payload: jsonb('payload').notNull(),
@@ -251,7 +260,7 @@ export const webhookLogs = pgTable('webhook_logs', {
 // 14. Agencies
 export const agencies = pgTable('agencies', {
   id: uuid('id').primaryKey().defaultRandom(),
-  ownerUserId: uuid('owner_user_id').notNull().unique(),
+  ownerUserId: uuid('owner_user_id').notNull().unique().references(() => users.id, { onDelete: 'cascade' }),
   name: varchar('name', { length: 255 }).notNull(),
   status: agencyStatusEnum('status').default('trial').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -275,8 +284,8 @@ export const agencyPackages = pgTable('agency_packages', {
 // 16. Agency Subscriptions
 export const agencySubscriptions = pgTable('agency_subscriptions', {
   id: uuid('id').primaryKey().defaultRandom(),
-  agencyId: uuid('agency_id').notNull(),
-  packageId: uuid('package_id').notNull(),
+  agencyId: uuid('agency_id').notNull().references(() => agencies.id, { onDelete: 'cascade' }),
+  packageId: uuid('package_id').notNull().references(() => agencyPackages.id, { onDelete: 'restrict' }),
   deviceQuota: integer('device_quota').notNull(),
   deviceUsed: integer('device_used').default(0).notNull(),
   activationLimit: integer('activation_limit').default(0).notNull(),

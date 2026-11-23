@@ -5,6 +5,7 @@ import { eq, and, gt } from 'drizzle-orm';
 import { hashPassword, verifyPassword, hashToken } from '../common/auth';
 import { authContext } from '../common/middleware';
 import { sendPasswordResetEmail } from '../common/mailer';
+import { sendWelcomeNotification } from '../common/notifications';
 import { config } from '../config';
 
 export const authRoutes = new Elysia({ prefix: '/auth' })
@@ -89,6 +90,8 @@ export const authRoutes = new Elysia({ prefix: '/auth' })
         role: newUser.role,
       });
 
+      sendWelcomeNotification(newUser).catch(() => {});
+
       const { passwordHash: _, ...safeUser } = newUser;
       return {
         accessToken,
@@ -117,66 +120,105 @@ export const authRoutes = new Elysia({ prefix: '/auth' })
         .limit(1);
 
       if (existing) {
-        set.status = 400;
-        return { message: 'Email sudah terdaftar' };
-      }
-
-      const passHash = await hashPassword(password);
-      const [newUser] = await db
-        .insert(schema.users)
-        .values({
-          name,
-          email: normalizedEmail,
-          phoneNumber: phoneNumber || null,
-          passwordHash: passHash,
-          role: 'agency',
-        })
-        .returning();
-
-      const [newAgency] = await db
-        .insert(schema.agencies)
-        .values({
-          ownerUserId: newUser.id,
-          name: agencyName || name,
-          status: 'trial',
-        })
-        .returning();
-
-      // If agency package selected, initialize subscription
-      if (packageId) {
-        const [pkg] = await db
-          .select()
-          .from(schema.agencyPackages)
-          .where(eq(schema.agencyPackages.id, packageId))
-          .limit(1);
-
-        if (pkg) {
-          const now = new Date();
-          const expiresAt = new Date(now.getTime() + (pkg.durationDays || 30) * 86400000);
-          await db.insert(schema.agencySubscriptions).values({
-            agencyId: newAgency.id,
-            packageId: pkg.id,
-            deviceQuota: pkg.deviceQuota,
-            activationLimit: pkg.activationLimit,
-            allowedPackages: pkg.allowedPackages,
-            startsAt: now,
-            expiresAt,
-            status: 'trial',
-          });
+        if (existing.role === 'agency' || existing.role === 'admin') {
+          set.status = 400;
+          return { message: 'Email sudah terdaftar sebagai agency atau admin' };
+        }
+        // Verify password of existing user to authorize upgrade
+        const isPassValid = await verifyPassword(password, existing.passwordHash);
+        if (!isPassValid) {
+          set.status = 400;
+          return { message: 'Email sudah terdaftar. Masukkan password akun Anda untuk upgrade ke Agency.' };
         }
       }
 
-      const accessToken = await jwt.sign({
-        sub: newUser.id,
-        email: newUser.email,
-        role: newUser.role,
+      const passHash = existing ? '' : await hashPassword(password);
+
+      const { agencyUser, targetAgency } = await db.transaction(async (tx) => {
+        let user: typeof schema.users.$inferSelect;
+        if (existing) {
+          const [updatedUser] = await tx
+            .update(schema.users)
+            .set({
+              role: 'agency',
+              phoneNumber: phoneNumber || existing.phoneNumber,
+              name: name || existing.name,
+            })
+            .where(eq(schema.users.id, existing.id))
+            .returning();
+          user = updatedUser;
+        } else {
+          const [newUser] = await tx
+            .insert(schema.users)
+            .values({
+              name,
+              email: normalizedEmail,
+              phoneNumber: phoneNumber || null,
+              passwordHash: passHash,
+              role: 'agency',
+            })
+            .returning();
+          user = newUser;
+        }
+
+        // Check if agency already exists
+        const [existingAgency] = await tx
+          .select()
+          .from(schema.agencies)
+          .where(eq(schema.agencies.ownerUserId, user.id))
+          .limit(1);
+
+        let agency = existingAgency;
+        if (!agency) {
+          const [newAgency] = await tx
+            .insert(schema.agencies)
+            .values({
+              ownerUserId: user.id,
+              name: agencyName || name,
+              status: 'trial',
+            })
+            .returning();
+          agency = newAgency;
+        }
+
+        // If agency package selected, initialize subscription
+        if (packageId) {
+          const [pkg] = await tx
+            .select()
+            .from(schema.agencyPackages)
+            .where(eq(schema.agencyPackages.id, packageId))
+            .limit(1);
+
+          if (pkg) {
+            const now = new Date();
+            const expiresAt = new Date(now.getTime() + (pkg.durationDays || 30) * 86400000);
+            await tx.insert(schema.agencySubscriptions).values({
+              agencyId: agency.id,
+              packageId: pkg.id,
+              deviceQuota: pkg.deviceQuota,
+              activationLimit: pkg.activationLimit,
+              allowedPackages: pkg.allowedPackages,
+              startsAt: now,
+              expiresAt,
+              status: 'trial',
+            });
+          }
+        }
+
+        return { agencyUser: user, targetAgency: agency };
       });
 
-      const { passwordHash: _, ...safeUser } = newUser;
+      const accessToken = await jwt.sign({
+        sub: agencyUser.id,
+        email: agencyUser.email,
+        role: agencyUser.role,
+      });
+
+      const { passwordHash: _, ...safeUser } = agencyUser;
       return {
         accessToken,
         user: safeUser,
-        agency: newAgency,
+        agency: targetAgency,
       };
     },
     {
@@ -191,6 +233,11 @@ export const authRoutes = new Elysia({ prefix: '/auth' })
     },
   )
   .get('/me', async ({ getAuthUser }) => {
+    const user = await getAuthUser();
+    const { passwordHash, passwordResetTokenHash, ...safeUser } = user;
+    return safeUser;
+  })
+  .get('/profile', async ({ getAuthUser }) => {
     const user = await getAuthUser();
     const { passwordHash, passwordResetTokenHash, ...safeUser } = user;
     return safeUser;
@@ -214,6 +261,7 @@ export const authRoutes = new Elysia({ prefix: '/auth' })
     {
       body: t.Object({
         name: t.Optional(t.String()),
+        email: t.Optional(t.String()),
         phoneNumber: t.Optional(t.String()),
       }),
     },
